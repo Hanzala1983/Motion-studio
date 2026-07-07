@@ -18,6 +18,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import com.example.render.NativeRenderer
 import androidx.compose.ui.geometry.Offset
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -314,6 +315,14 @@ object VideoRenderer {
             val canvas = Canvas(bitmap)
             val pixels = IntArray(width * height)
 
+            // Reused across every exported frame so we don't re-allocate a
+            // width*height*3/2 direct buffer per frame. Only actually
+            // needed when the native path is available (see below), but
+            // cheap enough to always allocate up front.
+            val nativeYuvBuffer: java.nio.ByteBuffer? = if (NativeRenderer.isAvailable) {
+                java.nio.ByteBuffer.allocateDirect(width * height * 3 / 2)
+            } else null
+
             val bufferInfo = MediaCodec.BufferInfo()
             var isInputDone = false
             var frameIndex = 0
@@ -331,12 +340,34 @@ object VideoRenderer {
                             drawMediaLayers(canvas, width, height, timeSec, mediaLayers, deletedLayers, layerStartTimes, layerEndTimes, layerTransforms, layerKeyframes, previewWidthPx, previewHeightPx)
                             drawShapeLayers(canvas, width, height, timeSec, shapeLayers, deletedLayers, layerStartTimes, layerEndTimes, layerTransforms, layerKeyframes, previewWidthPx, previewHeightPx)
 
-                            bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
-                            val yuvBytes = bitmapToYuv(pixels, width, height, useSemiPlanar)
-
                             val inputBuffer = encoder.getInputBuffer(inputBufferIndex)
                             inputBuffer?.clear()
-                            inputBuffer?.put(yuvBytes)
+
+                            // Prefer the native compositor's YUV conversion
+                            // (see NativeRenderer.nativeBitmapToYuv420) —
+                            // it's the same math as bitmapToYuv below but
+                            // without the per-pixel JVM loop, which was the
+                            // single biggest export bottleneck. Fall back to
+                            // the pure-Kotlin path per-frame if the native
+                            // library isn't loaded or the call fails, so a
+                            // native issue on a given device degrades to the
+                            // old (slower but proven) path instead of
+                            // breaking export entirely.
+                            val usedNative = nativeYuvBuffer != null && try {
+                                nativeYuvBuffer.clear()
+                                NativeRenderer.nativeBitmapToYuv420(bitmap, nativeYuvBuffer, useSemiPlanar)
+                                nativeYuvBuffer.rewind()
+                                inputBuffer?.put(nativeYuvBuffer)
+                                true
+                            } catch (e: Throwable) {
+                                Log.e(TAG, "Native YUV conversion failed for frame $frameIndex, falling back to Kotlin path", e)
+                                false
+                            }
+
+                            if (!usedNative) {
+                                bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+                                inputBuffer?.put(bitmapToYuv(pixels, width, height, useSemiPlanar))
+                            }
 
                             val presentationTimeUs = (frameIndex * 1000000L) / fps
                             encoder.queueInputBuffer(inputBufferIndex, 0, yuvBytes.size, presentationTimeUs, 0)

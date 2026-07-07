@@ -87,13 +87,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Smoke test only — confirms the native (C++) renderer library
-        // loaded and the JNI bridge resolves correctly, without yet routing
-        // any real export/render work through it. See
-        // com.example.render.NativeRenderer and app/src/main/cpp/ for the
-        // native engine this is the first slice of. Safe to fail: the app
-        // continues using the existing Kotlin VideoRenderer either way
-        // until VideoRenderer.kt is migrated to call NativeRenderer.
+        // Smoke test — confirms the native (C++) renderer library loaded
+        // and the JNI bridge resolves correctly. VideoRenderer.kt's export
+        // path now uses NativeRenderer.nativeBitmapToYuv420 when this is
+        // available, falling back to its own Kotlin conversion per-frame
+        // otherwise (see VideoRenderer.renderAndSaveVideo). Layer
+        // compositing (NativeRenderer.compositeFrame) is not wired in yet.
         if (com.example.render.NativeRenderer.isAvailable) {
             android.util.Log.i("NativeRenderer", "Loaded: ${com.example.render.NativeRenderer.nativeEngineVersion()}")
         } else {
