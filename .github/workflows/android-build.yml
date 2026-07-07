@@ -25,12 +25,15 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # GitHub-hosted ubuntu-latest runners already ship a full Android SDK
-      # with sdkmanager on PATH (ANDROID_HOME is preset) — no separate
-      # "setup Android SDK" action is needed. app/src/main/cpp/ contains
-      # the native (C++) rendering engine, though, and the preinstalled NDK
-      # version varies over time, so pin the exact NDK version Gradle's
-      # CMake integration should use.
+      # ubuntu-latest runners have ANDROID_HOME preset but no cmdline-tools/
+      # sdkmanager on PATH anymore — this action installs cmdline-tools and
+      # puts sdkmanager on PATH.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      # app/src/main/cpp/ contains the native (C++) rendering engine, and
+      # the preinstalled NDK version varies over time, so pin the exact
+      # NDK version Gradle's CMake integration should use.
       - name: Install NDK 27
         run: yes | sdkmanager --install "ndk;27.0.12077973" --sdk_root="${ANDROID_HOME}"
 
