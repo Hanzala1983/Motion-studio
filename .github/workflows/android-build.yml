@@ -1,0 +1,69 @@
+name: Android CI Build
+
+# Runs automatically on every push and pull request, so you can see build
+# status on GitHub's "Actions" tab right after pushing, without doing
+# anything else manually.
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+  # Lets you also trigger a build manually from the Actions tab if needed.
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # GitHub-hosted ubuntu-latest runners already ship a full Android SDK
+      # with sdkmanager on PATH (ANDROID_HOME is preset) — no separate
+      # "setup Android SDK" action is needed. app/src/main/cpp/ contains
+      # the native (C++) rendering engine, though, and the preinstalled NDK
+      # version varies over time, so pin the exact NDK version Gradle's
+      # CMake integration should use.
+      - name: Install NDK 27
+        run: yes | sdkmanager --install "ndk;27.0.12077973" --sdk_root="${ANDROID_HOME}"
+
+      # Regenerates gradle-wrapper.jar if it's missing/out of date, so this
+      # workflow works even before that binary file is committed — see
+      # NATIVE_RENDERER_MIGRATION.md for context on why it might be absent.
+      - name: Ensure Gradle wrapper is present
+        run: |
+          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+            echo "gradle-wrapper.jar missing — bootstrapping with system Gradle"
+            gradle wrapper --gradle-version 8.13
+          fi
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # Debug build only: it doesn't need the release keystore secrets
+      # (KEYSTORE_PATH / STORE_PASSWORD / KEY_PASSWORD) that
+      # app/build.gradle.kts reads for the release signing config, so this
+      # workflow can build and verify the app on every push with no extra
+      # repo secrets to configure.
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
