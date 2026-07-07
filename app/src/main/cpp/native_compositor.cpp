@@ -8,13 +8,13 @@ namespace {
 // Returns straight (non-premultiplied) RGBA in out[0..3]. Out-of-bounds reads
 // return fully transparent black.
 inline void sampleBilinear(const uint8_t* src, int srcW, int srcH, float sx, float sy, uint8_t out[4]) {
-    if (sx < 0.0f || sy < 0.0f || sx >= srcW - 1 || sy >= srcH - 1) {
-        // Allow sampling right up to the last pixel; anything further out
-        // (or negative) is outside the source image.
-        if (sx < -0.5f || sy < -0.5f || sx > srcW - 0.5f || sy > srcH - 0.5f) {
-            out[0] = out[1] = out[2] = out[3] = 0;
-            return;
-        }
+    // Out-of-bounds check: only reject pixels truly outside the source.
+    // The old check (sx >= srcW-1) incorrectly rejected the right/bottom
+    // edge pixel column/row, causing a visible transparent line when a
+    // layer fills the full canvas width/height.
+    if (sx < -0.5f || sy < -0.5f || sx > srcW - 0.5f || sy > srcH - 0.5f) {
+        out[0] = out[1] = out[2] = out[3] = 0;
+        return;
     }
     int x0 = std::clamp((int) std::floor(sx), 0, srcW - 1);
     int y0 = std::clamp((int) std::floor(sy), 0, srcH - 1);
