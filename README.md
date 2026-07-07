@@ -1,4 +1,4 @@
-#     Motion Studio
+#ss   Motion Studio
 
 A Jetpack Compose video editor for Android — timeline-based layer editing,
 keyframe animation (position, opacity, bezier easing), blend modes and visual
