@@ -614,8 +614,11 @@ object VideoRenderer {
 
             val transform = getActiveTransform(layer.layerId, timeSec, layerTransforms, layerKeyframes)
 
-            val maxW = w * 0.6f
-            val maxH = h * 0.6f
+            // Allow media layers to fill the full canvas (was capped at 60%,
+            // which caused preview-vs-export mismatch when a layer was dragged
+            // to screen width).
+            val maxW = w.toFloat()
+            val maxH = h.toFloat()
             val baseScale = minOf(maxW / frameBitmap.width, maxH / frameBitmap.height)
             val drawW = frameBitmap.width * baseScale
             val drawH = frameBitmap.height * baseScale
