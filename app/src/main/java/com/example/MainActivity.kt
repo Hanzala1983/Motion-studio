@@ -3,6 +3,7 @@ import com.example.model.AppliedEffect
 import com.example.model.createDefaultEffect
 import com.example.modifier.alightMotionEffects
 import com.example.viewmodel.BASE_LAYER_IDS
+import com.example.viewmodel.TIMELINE_ZOOM_RANGE
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
