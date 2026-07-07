@@ -455,11 +455,12 @@ fun AlightMotionTimelineEditor() {
                         Box(
                             modifier = Modifier
                                 .align(Alignment.Center)
-                                .offset(y = (index * 20 - 40).dp, x = (index * 20 - 40).dp)
                                 .graphicsLayer {
                                     val transform = getActiveTransform(layerId, viewModel.playheadProgress, viewModel.layerTransforms, viewModel.layerKeyframes)
-                                    translationX = transform.offsetX
-                                    translationY = transform.offsetY
+                                    val baseOffsetX = with(density) { (index * 20 - 40).dp.toPx() }
+                                    val baseOffsetY = with(density) { (index * 20 - 40).dp.toPx() }
+                                    translationX = baseOffsetX + transform.offsetX
+                                    translationY = baseOffsetY + transform.offsetY
                                     rotationZ = transform.rotation
                                     scaleX = transform.scaleX
                                     scaleY = transform.scaleY
@@ -525,11 +526,12 @@ fun AlightMotionTimelineEditor() {
                          Box(
                              modifier = Modifier
                                  .align(Alignment.Center)
-                                 .offset(y = (index * 20 - 40).dp, x = (index * 20 - 40).dp)
                                  .graphicsLayer {
                                      val transform = getActiveTransform(layerId, viewModel.playheadProgress, viewModel.layerTransforms, viewModel.layerKeyframes)
-                                     translationX = transform.offsetX
-                                     translationY = transform.offsetY
+                                     val baseOffsetX = with(density) { (index * 20 - 40).dp.toPx() }
+                                     val baseOffsetY = with(density) { (index * 20 - 40).dp.toPx() }
+                                     translationX = baseOffsetX + transform.offsetX
+                                     translationY = baseOffsetY + transform.offsetY
                                      rotationZ = transform.rotation
                                      scaleX = transform.scaleX
                                      scaleY = transform.scaleY
