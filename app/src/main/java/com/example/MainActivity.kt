@@ -54,6 +54,9 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.graphics.vector.ImageVector
+import android.net.Uri
 import androidx.compose.ui.platform.LocalContext
 import android.widget.Toast
 import androidx.compose.ui.unit.sp
@@ -386,6 +389,7 @@ fun AlightMotionTimelineEditor() {
                 .padding(vertical = 16.dp),
             contentAlignment = Alignment.Center
         ) {
+            val canvasDensity = LocalDensity.current
             val parentWidth = maxWidth
             val parentHeight = maxHeight
             val parentRatio = if (parentHeight.value > 0) parentWidth.value / parentHeight.value else 1f
@@ -430,7 +434,53 @@ fun AlightMotionTimelineEditor() {
                         viewModel.previewWidthPx = size.width.toFloat()
                         viewModel.previewHeightPx = size.height.toFloat()
                     }
-                    .clickable { viewModel.selectedLayer = null; viewModel.inMoveTransform = false; viewModel.inColorFill = false }
+                    // Smart hit-testing: graphicsLayer { scaleX/scaleY } only affects
+                    // visual rendering, NOT the clickable area.  When a layer is
+                    // scaled up beyond its original layout size, taps on the visual
+                    // overflow used to fall through to this handler and deselect the
+                    // layer.  We now do proper hit-testing against each layer's
+                    // visual bounds (accounting for scale, rotation & translation) so
+                    // that tapping on a large layer selects it instead of deselecting.
+                    .pointerInput(
+                        viewModel.addedShapes.toList(),
+                        viewModel.addedMedia.toList(),
+                        viewModel.layerTransforms,
+                        viewModel.layerKeyframes,
+                        viewModel.playheadProgress,
+                        viewModel.deletedLayers,
+                        viewModel.layerStartTimes,
+                        viewModel.layerEndTimes,
+                        viewModel.selectedLayer,
+                        viewModel.previewWidthPx,
+                        viewModel.previewHeightPx
+                    ) {
+                        detectTapGestures { tapOffset ->
+                            val hitLayer = findHitLayer(
+                                tapOffset = tapOffset,
+                                canvasWidthPx = viewModel.previewWidthPx,
+                                canvasHeightPx = viewModel.previewHeightPx,
+                                addedShapes = viewModel.addedShapes,
+                                addedMedia = viewModel.addedMedia,
+                                layerTransforms = viewModel.layerTransforms,
+                                layerKeyframes = viewModel.layerKeyframes,
+                                playheadProgress = viewModel.playheadProgress,
+                                deletedLayers = viewModel.deletedLayers,
+                                layerStartTimes = viewModel.layerStartTimes,
+                                layerEndTimes = viewModel.layerEndTimes,
+                                density = canvasDensity
+                            )
+                            if (hitLayer != null) {
+                                if (viewModel.selectedLayer != hitLayer) {
+                                    viewModel.selectedLayer = hitLayer
+                                }
+                                // If tap is on the already-selected layer, keep it selected
+                            } else {
+                                viewModel.selectedLayer = null
+                                viewModel.inMoveTransform = false
+                                viewModel.inColorFill = false
+                            }
+                        }
+                    }
             ) {
                // watermark
                Box(
@@ -1779,4 +1829,120 @@ fun formatRulerLabel(totalSeconds: Float): String {
         val seconds = (rounded % 60).toInt()
         if (minutes > 0) String.format("%d:%02d", minutes, seconds) else "${seconds}s"
     }
+}
+
+/**
+ * Checks which layer's visual bounds contain the given tap offset.
+ * Iterates layers in reverse order (top-most rendered first) so overlapping
+ * layers are handled correctly — the visually topmost layer wins.
+ *
+ * This is needed because Compose's `graphicsLayer { scaleX / scaleY }` only
+ * affects rendering, not hit-testing.  A scaled-up layer's clickable area
+ * remains at its original (small) layout size, so taps on the visual
+ * overflow would otherwise miss the layer entirely and trigger the canvas
+ * background's deselect handler instead.
+ *
+ * @return the layerId of the hit layer, or null if the tap is on empty canvas.
+ */
+fun findHitLayer(
+    tapOffset: Offset,
+    canvasWidthPx: Float,
+    canvasHeightPx: Float,
+    addedShapes: List<ImageVector?>,
+    addedMedia: List<Uri>,
+    layerTransforms: Map<String, LayerTransform>,
+    layerKeyframes: Map<String, List<LayerKeyframe>>,
+    playheadProgress: Float,
+    deletedLayers: Set<String>,
+    layerStartTimes: Map<String, Float>,
+    layerEndTimes: Map<String, Float>,
+    density: Density
+): String? {
+    val centerX = canvasWidthPx / 2f
+    val centerY = canvasHeightPx / 2f
+
+    // Media layers are rendered after shape layers, so they're visually on top.
+    // Check them first (in reverse so the last-added/topmost wins).
+    for (i in addedMedia.indices.reversed()) {
+        val layerId = "Media ${i + 1}"
+        if (layerId in deletedLayers) continue
+        val start = layerStartTimes[layerId] ?: 0f
+        val end = layerEndTimes[layerId] ?: Float.MAX_VALUE
+        if (playheadProgress < start || playheadProgress > end) continue
+
+        val transform = getActiveTransform(layerId, playheadProgress, layerTransforms, layerKeyframes)
+        val baseOffsetX = with(density) { (i * 20 - 40).dp.toPx() }
+        val baseOffsetY = with(density) { (i * 20 - 40).dp.toPx() }
+        val baseSizePx = with(density) { 160.dp.toPx() }
+
+        if (isPointInVisualBounds(tapOffset, centerX, centerY, baseOffsetX, baseOffsetY, transform, baseSizePx, baseSizePx)) {
+            return layerId
+        }
+    }
+
+    // Shape layers
+    for (i in addedShapes.indices.reversed()) {
+        val layerId = "Shape ${i + 1}"
+        if (layerId in deletedLayers) continue
+        val start = layerStartTimes[layerId] ?: 0f
+        val end = layerEndTimes[layerId] ?: Float.MAX_VALUE
+        if (playheadProgress < start || playheadProgress > end) continue
+
+        val transform = getActiveTransform(layerId, playheadProgress, layerTransforms, layerKeyframes)
+        val baseOffsetX = with(density) { (i * 20 - 40).dp.toPx() }
+        val baseOffsetY = with(density) { (i * 20 - 40).dp.toPx() }
+        val baseSizePx = if (layerId == "Shape 2") with(density) { 120.dp.toPx() } else with(density) { 80.dp.toPx() }
+
+        if (isPointInVisualBounds(tapOffset, centerX, centerY, baseOffsetX, baseOffsetY, transform, baseSizePx, baseSizePx)) {
+            return layerId
+        }
+    }
+
+    return null
+}
+
+/**
+ * Checks whether a point (in canvas coordinates) falls within a layer's
+ * visual bounds, accounting for the full `graphicsLayer` transform:
+ *  - translation (base offset + user offset)
+ *  - scale
+ *  - rotation
+ *
+ * Algorithm:
+ *  1. Compute the layer's visual center in canvas coordinates.
+ *  2. Translate the test point relative to that center.
+ *  3. Rotate the relative point by **-rotation** to undo the layer's rotation.
+ *  4. Check if the unrotated point is inside the scaled rectangle.
+ */
+fun isPointInVisualBounds(
+    point: Offset,
+    canvasCenterX: Float,
+    canvasCenterY: Float,
+    baseOffsetX: Float,
+    baseOffsetY: Float,
+    transform: LayerTransform,
+    baseWidthPx: Float,
+    baseHeightPx: Float
+): Boolean {
+    // Layer center in canvas coordinates
+    val layerCenterX = canvasCenterX + baseOffsetX + transform.offsetX
+    val layerCenterY = canvasCenterY + baseOffsetY + transform.offsetY
+
+    // Scaled half-dimensions (abs handles negative scale = flip)
+    val halfW = baseWidthPx * kotlin.math.abs(transform.scaleX) / 2f
+    val halfH = baseHeightPx * kotlin.math.abs(transform.scaleY) / 2f
+
+    // Translate point relative to layer center
+    val dx = point.x - layerCenterX
+    val dy = point.y - layerCenterY
+
+    // Rotate by -rotation to get layer-local coordinates
+    val angleRad = -Math.toRadians(transform.rotation.toDouble())
+    val cosA = kotlin.math.cos(angleRad).toFloat()
+    val sinA = kotlin.math.sin(angleRad).toFloat()
+    val localX = dx * cosA - dy * sinA
+    val localY = dx * sinA + dy * cosA
+
+    // Check if local point is within the scaled rectangle
+    return localX >= -halfW && localX <= halfW && localY >= -halfH && localY <= halfH
 }
