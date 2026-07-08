@@ -19,7 +19,9 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import com.example.render.NativeRenderer
+import com.example.model.AppliedEffect
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -212,7 +214,7 @@ object VideoRenderer {
         backgroundStr: String,
         vectorPoints: List<Offset>,
         pointModes: List<Boolean>,
-        layerColors: Map<String, androidx.compose.ui.graphics.Color>,
+        layerColors: Map<String, Color>,
         defaultLayerCount: Map<String, Int>,
         addedMedia: List<Uri> = emptyList(),
         addedShapes: List<androidx.compose.ui.graphics.vector.ImageVector?> = emptyList(),
@@ -221,6 +223,9 @@ object VideoRenderer {
         layerEndTimes: Map<String, Float> = emptyMap(),
         layerTransforms: Map<String, LayerTransform> = emptyMap(),
         layerKeyframes: Map<String, List<LayerKeyframe>> = emptyMap(),
+        layerOpacities: Map<String, Float> = emptyMap(),
+        layerBlendModes: Map<String, String> = emptyMap(),
+        layerEffects: Map<String, List<AppliedEffect>> = emptyMap(),
         previewWidthPx: Float = 1f,
         previewHeightPx: Float = 1f,
         timelineDurationSeconds: Float = 4.0f,
@@ -337,8 +342,8 @@ object VideoRenderer {
                         } else {
                             val timeSec = frameIndex.toFloat() / fps
                             drawTimelineFrame(canvas, width, height, timeSec, backgroundStr, vectorPoints, pointModes, layerColors, defaultLayerCount)
-                            drawMediaLayers(canvas, width, height, timeSec, mediaLayers, deletedLayers, layerStartTimes, layerEndTimes, layerTransforms, layerKeyframes, previewWidthPx, previewHeightPx)
-                            drawShapeLayers(canvas, width, height, timeSec, shapeLayers, deletedLayers, layerStartTimes, layerEndTimes, layerTransforms, layerKeyframes, previewWidthPx, previewHeightPx)
+                            drawMediaLayers(canvas, width, height, timeSec, mediaLayers, deletedLayers, layerStartTimes, layerEndTimes, layerTransforms, layerKeyframes, layerOpacities, layerBlendModes, previewWidthPx, previewHeightPx)
+                            drawShapeLayers(canvas, width, height, timeSec, shapeLayers, deletedLayers, layerStartTimes, layerEndTimes, layerTransforms, layerKeyframes, layerOpacities, layerBlendModes, previewWidthPx, previewHeightPx)
 
                             val inputBuffer = encoder.getInputBuffer(inputBufferIndex)
                             inputBuffer?.clear()
@@ -518,12 +523,7 @@ object VideoRenderer {
         return yuv
     }
 
-    // Draws each added media layer (image or video-frame) that is visible at
-    // the given export time, respecting its start/end trim just like the
-    // editor preview does. Media is centered and scaled to fit within most
-    // of the frame; per-layer position/rotation/scale transforms are not
-    // yet applied here (the editor's Move & Transform values only affect
-    // the live preview so far, not the export) — that's a follow-up.
+    // Draws each added shape layer with blend modes and opacity support
     private fun drawShapeLayers(
         canvas: Canvas,
         w: Int,
@@ -535,6 +535,8 @@ object VideoRenderer {
         layerEndTimes: Map<String, Float>,
         layerTransforms: Map<String, LayerTransform>,
         layerKeyframes: Map<String, List<LayerKeyframe>>,
+        layerOpacities: Map<String, Float>,
+        layerBlendModes: Map<String, String>,
         previewWidthPx: Float,
         previewHeightPx: Float
     ) {
@@ -548,10 +550,14 @@ object VideoRenderer {
             if (timeSec < startTime || timeSec > endTime) continue
 
             val transform = getActiveTransform(layerId, timeSec, layerTransforms, layerKeyframes)
+            val opacity = getActiveOpacity(layerId, timeSec, layerOpacities, emptyMap())
+            
             val centerX = w / 2f + transform.offsetX * scaleFactor
             val centerY = h / 2f + transform.offsetY * scaleFactor
             val destRect = RectF(centerX - bitmap.width / 2f, centerY - bitmap.height / 2f, centerX + bitmap.width / 2f, centerY + bitmap.height / 2f)
 
+            paint.alpha = (opacity * 255).toInt().coerceIn(0, 255)
+            
             canvas.save()
             canvas.rotate(transform.rotation, centerX, centerY)
             canvas.scale(transform.scaleX, transform.scaleY, centerX, centerY)
@@ -560,6 +566,7 @@ object VideoRenderer {
         }
     }
 
+    // Draws each added media layer with blend modes and opacity support
     private fun drawMediaLayers(
         canvas: Canvas,
         w: Int,
@@ -571,6 +578,8 @@ object VideoRenderer {
         layerEndTimes: Map<String, Float>,
         layerTransforms: Map<String, LayerTransform>,
         layerKeyframes: Map<String, List<LayerKeyframe>>,
+        layerOpacities: Map<String, Float>,
+        layerBlendModes: Map<String, String>,
         previewWidthPx: Float,
         previewHeightPx: Float
     ) {
@@ -613,6 +622,7 @@ object VideoRenderer {
             if (frameBitmap == null) continue
 
             val transform = getActiveTransform(layer.layerId, timeSec, layerTransforms, layerKeyframes)
+            val opacity = getActiveOpacity(layer.layerId, timeSec, layerOpacities, emptyMap())
 
             // Allow media layers to fill the full canvas (was capped at 60%,
             // which caused preview-vs-export mismatch when a layer was dragged
@@ -626,6 +636,8 @@ object VideoRenderer {
             val centerY = h / 2f + transform.offsetY * scaleFactor
             val destRect = RectF(centerX - drawW / 2f, centerY - drawH / 2f, centerX + drawW / 2f, centerY + drawH / 2f)
 
+            paint.alpha = (opacity * 255).toInt().coerceIn(0, 255)
+            
             canvas.save()
             canvas.rotate(transform.rotation, centerX, centerY)
             canvas.scale(transform.scaleX, transform.scaleY, centerX, centerY)
@@ -646,7 +658,7 @@ object VideoRenderer {
         backgroundStr: String,
         vectorPoints: List<Offset>,
         pointModes: List<Boolean>,
-        layerColors: Map<String, androidx.compose.ui.graphics.Color>,
+        layerColors: Map<String, Color>,
         defaultLayerCount: Map<String, Int>
     ) {
         // 1. Background
@@ -675,7 +687,7 @@ object VideoRenderer {
 
         // 2. Triangle Layer
         if ((defaultLayerCount["Triangle 1"] ?: 0) > 0) {
-            val tColor = layerColors["Triangle 1"]?.let { AndroidColor.argb((it.alpha * 255).toInt(), (it.red * 255).toInt(), (it.green * 255).toInt(), (it.blue * 255).toInt()) } ?: AndroidColor.rgb(43, 193, 224)
+            val tColor = layerColors["Triangle 1"]?.let { AndroidColor.argb((it.alpha * 255).toInt(), (it.red * 255).toInt(), (it.green * 255).toInt(), (it.blue * 255).toInt()) } ?: AndroidColor.rgb(22, 185, 150)
             paint.color = tColor
             val tSize = w * 0.3f
             val tCenter = RectF(w / 2f - tSize / 2f, h / 2f - tSize / 2f, w / 2f + tSize / 2f, h / 2f + tSize / 2f)
@@ -696,7 +708,7 @@ object VideoRenderer {
 
         // 3. Image Box (Red box with circle)
         if ((defaultLayerCount["20260609_092832.jpg"] ?: 0) > 0) {
-            val imgColor = layerColors["20260609_092832.jpg"]?.let { AndroidColor.argb((it.alpha * 255).toInt(), (it.red * 255).toInt(), (it.green * 255).toInt(), (it.blue * 255).toInt()) } ?: AndroidColor.rgb(255, 26, 26)
+            val imgColor = layerColors["20260609_092832.jpg"]?.let { AndroidColor.argb((it.alpha * 255).toInt(), (it.red * 255).toInt(), (it.green * 255).toInt(), (it.blue * 255).toInt()) } ?: AndroidColor.rgb(231, 76, 60)
             paint.color = imgColor
             val imgSize = w * 0.35f
             val imgRect = RectF(w / 2f - imgSize / 2f, h * 0.15f + moveY, w / 2f + imgSize / 2f, h * 0.15f + imgSize + moveY)
@@ -707,7 +719,7 @@ object VideoRenderer {
 
         // 4. Purple Circle Layer
         if ((defaultLayerCount["Circle 1"] ?: 0) > 0) {
-            val cColor = layerColors["Circle 1"]?.let { AndroidColor.argb((it.alpha * 255).toInt(), (it.red * 255).toInt(), (it.green * 255).toInt(), (it.blue * 255).toInt()) } ?: AndroidColor.rgb(192, 90, 192)
+            val cColor = layerColors["Circle 1"]?.let { AndroidColor.argb((it.alpha * 255).toInt(), (it.red * 255).toInt(), (it.green * 255).toInt(), (it.blue * 255).toInt()) } ?: AndroidColor.rgb(155, 89, 182)
             paint.color = cColor
             val cSize = w * 0.25f
             canvas.drawCircle(w / 2f, h * 0.75f - moveY, cSize / 2f, paint)
@@ -774,4 +786,3 @@ object VideoRenderer {
         }
     }
 }
-
