@@ -447,7 +447,7 @@ fun AlightMotionTimelineEditor() {
                         viewModel.layerTransforms,
                         viewModel.layerKeyframes,
                         viewModel.playheadProgress,
-                        viewModel.deletedLayers,
+                        viewModel.deletedLayers.toSet(),
                         viewModel.layerStartTimes,
                         viewModel.layerEndTimes,
                         viewModel.selectedLayer,
@@ -464,7 +464,7 @@ fun AlightMotionTimelineEditor() {
                                 layerTransforms = viewModel.layerTransforms,
                                 layerKeyframes = viewModel.layerKeyframes,
                                 playheadProgress = viewModel.playheadProgress,
-                                deletedLayers = viewModel.deletedLayers,
+                                deletedLayers = viewModel.deletedLayers.toSet(),
                                 layerStartTimes = viewModel.layerStartTimes,
                                 layerEndTimes = viewModel.layerEndTimes,
                                 density = canvasDensity
